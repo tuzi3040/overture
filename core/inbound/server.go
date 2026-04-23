@@ -174,7 +174,9 @@ func (s *Server) Run() {
 			go func() {
 				<-s.ctx.Done()
 				log.Warnf("Shutting down the server on protocol %s", p)
-				srv.ShutdownContext(s.ctx)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				srv.ShutdownContext(ctx)
 			}()
 			err := srv.ListenAndServe()
 			if err != nil {
@@ -207,7 +209,9 @@ func (s *Server) Run() {
 			go func() {
 				<-s.ctx.Done()
 				log.Warnf("Shutting down debug HTTP server")
-				srv.Shutdown(s.ctx)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				srv.Shutdown(ctx)
 			}()
 
 			err := srv.ListenAndServe()

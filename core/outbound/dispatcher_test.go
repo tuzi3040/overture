@@ -3,6 +3,7 @@ package outbound
 import (
 	"net"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -10,10 +11,34 @@ import (
 
 	"github.com/shawn1m/overture/core/common"
 	"github.com/shawn1m/overture/core/config"
+	"github.com/shawn1m/overture/core/outbound/clients/resolver"
 )
 
 var dispatcher Dispatcher
 var questionDomain = "www.yahoo.com."
+
+type staticResolver struct {
+	ip string
+}
+
+func (r staticResolver) Init() error { return nil }
+
+func (r staticResolver) Exchange(q *dns.Msg) (*dns.Msg, error) {
+	resp := new(dns.Msg)
+	resp.SetReply(q)
+	resp.Answer = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{
+				Name:   q.Question[0].Name,
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+				Ttl:    60,
+			},
+			A: net.ParseIP(r.ip),
+		},
+	}
+	return resp, nil
+}
 
 func init() {
 	os.Chdir("../..")
@@ -46,6 +71,53 @@ func TestDispatcher(t *testing.T) {
 	testHosts(t)
 	testIPResponse(t)
 	testCache(t)
+}
+
+func TestConcurrentAlternativeDoesNotLeakGoroutines(t *testing.T) {
+	_, primaryNet, err := net.ParseCIDR("1.2.3.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, alternativeNet, err := net.ParseCIDR("5.6.7.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	upstream := func(name string) *common.DNSUpstream {
+		return &common.DNSUpstream{
+			Name:     name,
+			Protocol: "udp",
+			EDNSClientSubnet: &common.EDNSClientSubnetType{
+				Policy: "disable",
+			},
+		}
+	}
+
+	d := Dispatcher{
+		PrimaryDNS:               []*common.DNSUpstream{upstream("primary")},
+		AlternativeDNS:           []*common.DNSUpstream{upstream("alternative")},
+		AlternativeDNSConcurrent: true,
+		IPNetworkPrimarySet:      common.NewIPSet([]*net.IPNet{primaryNet}),
+		IPNetworkAlternativeSet:  common.NewIPSet([]*net.IPNet{alternativeNet}),
+		primaryResolvers:         []resolver.Resolver{staticResolver{ip: "1.2.3.4"}},
+		alternativeResolvers:     []resolver.Resolver{staticResolver{ip: "5.6.7.8"}},
+	}
+
+	before := runtime.NumGoroutine()
+	for i := 0; i < 25; i++ {
+		q := new(dns.Msg)
+		q.SetQuestion(questionDomain, dns.TypeA)
+		resp := d.Exchange(q, "")
+		if got := common.FindRecordByType(resp, dns.TypeA); got != "1.2.3.4" {
+			t.Fatalf("expected primary response, got %s", got)
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	after := runtime.NumGoroutine()
+
+	if after > before+5 {
+		t.Fatalf("possible goroutine leak: before=%d after=%d", before, after)
+	}
 }
 
 func testA(t *testing.T) {

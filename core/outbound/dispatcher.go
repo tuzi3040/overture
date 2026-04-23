@@ -118,8 +118,8 @@ func (d *Dispatcher) isSelectDomain(rcb *clients.RemoteClientBundle, dt matcher.
 }
 
 func (d *Dispatcher) selectByIPNetwork(PrimaryClientBundle, AlternativeClientBundle *clients.RemoteClientBundle) *clients.RemoteClientBundle {
-	primaryOut := make(chan *dns.Msg)
-	alternateOut := make(chan *dns.Msg)
+	primaryOut := make(chan *dns.Msg, 1)
+	alternateOut := make(chan *dns.Msg, 1)
 	go func() {
 		primaryOut <- PrimaryClientBundle.Exchange(false, true)
 	}()
