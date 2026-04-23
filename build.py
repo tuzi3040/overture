@@ -7,6 +7,7 @@ GO_OS_ARCH_LIST = [
     ["darwin", "amd64"],
     ["linux", "386"],
     ["linux", "amd64"],
+    ["linux", "amd64", "v3"],
     ["linux", "arm"],
     ["linux", "arm64"],
     ["linux", "mips", "softfloat"],
@@ -18,7 +19,8 @@ GO_OS_ARCH_LIST = [
     ["freebsd", "386"],
     ["freebsd", "amd64"],
     ["windows", "386"],
-    ["windows", "amd64"]
+    ["windows", "amd64"],
+    ["windows", "amd64", "v3"]
               ]
 
 GO_IOS_ARCH_LIST = [
@@ -33,10 +35,18 @@ GO_ANDROID_ARCH_LIST = [
     ["android", "amd64", "x86_64-linux-android"],
 ]
 
-
 def go_build_desktop(binary_name, version, o, a, p):
-    mipsflag = (" GOMIPS=" + (p[0] if p else "") if p else "")
-    subprocess.check_call("GOOS=" + o + " GOARCH=" + a + mipsflag + " CGO_ENABLED=0" + " go build -ldflags \"-s -w " +
+    env_flags = []
+    if p:
+        if p[0] in ("softfloat", "hardfloat"):
+            env_flags.append("GOMIPS=" + p[0])
+        if a == "amd64" and p[0] == "v3":
+            env_flags.append("GOAMD64=v3")
+        for flag in p:
+            if "=" in flag:
+                env_flags.append(flag)
+    env_prefix = (" " + " ".join(env_flags)) if env_flags else ""
+    subprocess.check_call("GOOS=" + o + " GOARCH=" + a + env_prefix + " CGO_ENABLED=0" + " go build -ldflags \"-s -w " +
                                   "-X main.version=" + version + "\" -o " + binary_name + " main/main.go", shell=True)
 
 def go_build_ios(binary_name, version, o, a, p):
@@ -49,7 +59,6 @@ def go_build_android(binary_name, version, o, a, p):
                                   "-X main.version=" + version + "\" -o " + binary_name + " main/main.go", shell=True)
 
 def go_build_zip(arches, builder):
-    subprocess.check_call("GOOS=windows go get -v github.com/shawn1m/overture/main", shell=True)
     for o, a, *p in arches:
         zip_name = "overture-" + o + "-" + a + ("-" + (p[0] if p else "") if p else "")
         binary_name = zip_name + (".exe" if o == "windows" else "")
